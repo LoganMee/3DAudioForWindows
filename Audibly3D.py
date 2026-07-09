@@ -2,8 +2,7 @@ from tkinter import *
 import math, time, threading
 import comtypes
 from comtypes import CLSCTX_ALL
-from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume, IMMDeviceEnumerator, EDataFlow, DEVICE_STATE
-from pycaw.constants import CLSID_MMDeviceEnumerator
+from pycaw.pycaw import AudioUtilities, EDataFlow, DEVICE_STATE
 import os
 dir = os.path.dirname(__file__)
 
@@ -69,40 +68,46 @@ class Audio3DInterface:
     
     #################### Subroutines ####################
     def setupAudio(self):
-        self.devices = AudioUtilities.GetSpeakers()
-        self.interface = self.devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-        self.volume = self.interface.QueryInterface(IAudioEndpointVolume)
+        self.activeDevice = AudioUtilities.GetSpeakers()
+        self.volume = self.activeDevice.EndpointVolume
         self.leftStartingVolume = self.volume.GetChannelVolumeLevelScalar(0)
         self.rightStartingVolume = self.volume.GetChannelVolumeLevelScalar(1)
         self.getCurrentOutputDeviceName()
     
     def getOutputDevices(self):
-        deviceEnumerator = comtypes.CoCreateInstance(CLSID_MMDeviceEnumerator, IMMDeviceEnumerator, comtypes.CLSCTX_INPROC_SERVER)
-        collection = deviceEnumerator.EnumAudioEndpoints(EDataFlow.eRender.value, DEVICE_STATE.ACTIVE.value)
-        devices = []
+        return AudioUtilities.GetAllDevices(data_flow=EDataFlow.eRender.value, device_state=DEVICE_STATE.ACTIVE.value)
 
-        for i in range(collection.GetCount()):
-            dev = collection.Item(i)
-            devices.append(AudioUtilities.CreateDevice(dev))
-        return devices
+    def listOutputDevices(self):
+        devices = self.getOutputDevices()
+        deviceList = []
+
+        for device in devices:
+            deviceList.append(device.FriendlyName)
+
+        return deviceList
     
     def getCurrentOutputDeviceName(self):
+        self.currentOutputDevice.set(self.activeDevice.FriendlyName)
+
+    def setActiveDevice(self, selectedDevice):
+        self.resetToStarting()
         for device in self.getOutputDevices():
-            if device.id == self.devices.GetId(): 
-                self.currentOutputDevice.set(device.FriendlyName)
+            if device.FriendlyName == selectedDevice:
+                AudioUtilities.SetDefaultDevice(device.id)
+                self.setupAudio()
 
     def loadSettings(self):
-        with open(os.path.relpath('settings\settings.txt', dir), 'r') as f:
+        with open(os.path.join(dir, 'settings', 'settings.txt'), 'r') as f:
             for setting in self.settingsDictionary.values():
                 setting.set(int(f.readline().split(':')[1]))
     
     def saveSettings(self):
-        with open(os.path.relpath('settings\settings.txt', dir), 'w') as f:
+        with open(os.path.join(dir, 'settings', 'settings.txt'), 'w') as f:
             for settingName, setting in self.settingsDictionary.items():
                 f.write(f"{settingName}: {setting.get()}\n")
 
     def restoreDefaultSettings(self):
-        with open(os.path.relpath('settings\defaultSettings.txt', dir), 'r') as default, open(os.path.relpath('settings\settings.txt', dir), 'w') as settings:
+        with open(os.path.join(dir, 'settings', 'defaultSettings.txt'), 'r') as default, open(os.path.join(dir, 'settings', 'settings.txt'), 'w') as settings:
             for line in default:
                 settings.write(line)
         self.loadSettings()
@@ -170,6 +175,7 @@ class Audio3DInterface:
         rightIntensity = (((((angle/(math.pi/2))/2)+0.5)*(1-minLvlFraction))+minLvlFraction) * intensityMultiplier
         #print(leftIntensity, rightIntensity)
         
+        #
         self.volume.SetChannelVolumeLevelScalar(0, leftIntensity, None) #Left Channel
         self.volume.SetChannelVolumeLevelScalar(1, rightIntensity, None) #Right Channel
     
@@ -243,15 +249,18 @@ class Audio3DInterface:
         if not any(isinstance(x, Toplevel) for x in self.root.winfo_children()): #Only one topLevel window at a time
             self.settingsWin = Toplevel(self.root)
             self.settingsWin.title("Settings")
-            self.settingsWin.geometry("225x430")
+            self.settingsWin.geometry("275x430")
             self.settingsWin.resizable(False, False)
     #Output Device Settings
         outputDeviceSettingsLabel = Label(self.settingsWin, text="Output Device Settings:")
         outputDeviceSettingsLabel.config(bg="Gray", width=30)
         outputDeviceSettingsLabel.grid(column=0, row=0, columnspan=3)
 
-        outputDeviceLabel = Label(self.settingsWin, textvariable=self.currentOutputDevice)
-        outputDeviceLabel.grid(column=0, row=1, columnspan=3, pady=3)
+        #outputDeviceLabel = Label(self.settingsWin, textvariable=self.currentOutputDevice)
+        #outputDeviceLabel.grid(column=0, row=1, columnspan=3, pady=3)
+
+        outputDeviceDropdown = OptionMenu(self.settingsWin, self.currentOutputDevice, *self.listOutputDevices(), command=self.setActiveDevice)
+        outputDeviceDropdown.grid(column=0, row=1, columnspan=3, pady=3)
         
         refindOutputDeviceButton = Button(self.settingsWin, width=17, text="Refind Output Device", command=lambda:[self.resetToStarting(), self.setupAudio()])
         refindOutputDeviceButton.grid(column=0, row=2, columnspan=3, pady=3)
