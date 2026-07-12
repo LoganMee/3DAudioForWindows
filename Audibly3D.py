@@ -2,7 +2,7 @@ from tkinter import *
 import math, time, threading
 import comtypes
 from comtypes import CLSCTX_ALL
-from pycaw.pycaw import AudioUtilities, EDataFlow, DEVICE_STATE
+from pycaw.pycaw import AudioUtilities, EDataFlow, DEVICE_STATE, IAudioClient
 import os
 dir = os.path.dirname(__file__)
 
@@ -74,11 +74,23 @@ class Audio3DInterface:
         self.rightStartingVolume = self.volume.GetChannelVolumeLevelScalar(1)
         self.getCurrentOutputDeviceName()
     
-    def getOutputDevices(self):
-        return AudioUtilities.GetAllDevices(data_flow=EDataFlow.eRender.value, device_state=DEVICE_STATE.ACTIVE.value)
+    def getStereoOutputDevices(self):
+        devices = AudioUtilities.GetAllDevices(data_flow=EDataFlow.eRender.value, device_state=DEVICE_STATE.ACTIVE.value)
+        stereo_devices = []
+        for device in devices:
+            try:
+                volume_interface = device.EndpointVolume
+                num_channels = volume_interface.GetChannelCount()
+                #print(f"Device: '{device.FriendlyName}' | Channels: {num_channels}")
+                if num_channels == 2:
+                    stereo_devices.append(device)
+            except Exception as e:
+                #print(f"Could not query device '{device.FriendlyName}'. Skipping. It may not support volume control. Error: {e}")
+                continue
+        return stereo_devices
 
     def listOutputDevices(self):
-        devices = self.getOutputDevices()
+        devices = self.getStereoOutputDevices()
         deviceList = []
 
         for device in devices:
@@ -91,7 +103,7 @@ class Audio3DInterface:
 
     def setActiveDevice(self, selectedDevice):
         self.resetToStarting()
-        for device in self.getOutputDevices():
+        for device in self.getStereoOutputDevices():
             if device.FriendlyName == selectedDevice:
                 AudioUtilities.SetDefaultDevice(device.id)
                 self.setupAudio()
@@ -249,24 +261,31 @@ class Audio3DInterface:
         if not any(isinstance(x, Toplevel) for x in self.root.winfo_children()): #Only one topLevel window at a time
             self.settingsWin = Toplevel(self.root)
             self.settingsWin.title("Settings")
-            self.settingsWin.geometry("275x430")
-            self.settingsWin.resizable(False, False)
-    #Output Device Settings
-        outputDeviceSettingsLabel = Label(self.settingsWin, text="Output Device Settings:")
-        outputDeviceSettingsLabel.config(bg="Gray", width=30)
-        outputDeviceSettingsLabel.grid(column=0, row=0, columnspan=3)
+            self.settingsWin.geometry("300x450")
+            self.settingsWin.resizable(True, False)
+            self.settingsWin.minsize(width=300, height=450)
+            self.settingsWin.maxsize(width=450, height=450)
 
-        #outputDeviceLabel = Label(self.settingsWin, textvariable=self.currentOutputDevice)
-        #outputDeviceLabel.grid(column=0, row=1, columnspan=3, pady=3)
+    #Centre Columns Horizontally to scale for window width changes
+        for x in range(3):
+            self.settingsWin.grid_columnconfigure(x, weight=1)
+
+    #Output Device Settings
+        outputDeviceSettingsLabel = Label(self.settingsWin, text="Output Device:")
+        outputDeviceSettingsLabel.config(bg="Gray", width=40)
+        outputDeviceSettingsLabel.grid(column=0, row=0, columnspan=3, padx=5)
 
         outputDeviceDropdown = OptionMenu(self.settingsWin, self.currentOutputDevice, *self.listOutputDevices(), command=self.setActiveDevice)
         outputDeviceDropdown.grid(column=0, row=1, columnspan=3, pady=3)
+
+        outputDeviceInfoLabel = Label(self.settingsWin, text="*Only stereo output devices are supported\n (mono devices wont appear)")
+        outputDeviceInfoLabel.grid(column=0, row=2, columnspan=3)
         
-        refindOutputDeviceButton = Button(self.settingsWin, width=17, text="Refind Output Device", command=lambda:[self.resetToStarting(), self.setupAudio()])
-        refindOutputDeviceButton.grid(column=0, row=2, columnspan=3, pady=3)
+        #refindOutputDeviceButton = Button(self.settingsWin, width=25, text="Refind Current Output Device", command=lambda:[self.resetToStarting(), self.setupAudio()])
+        #refindOutputDeviceButton.grid(column=0, row=2, columnspan=3, pady=3)
     #Audio Settings
         audioSettingsLabel = Label(self.settingsWin, text="Audio Settings:")
-        audioSettingsLabel.config(bg="Gray", width=30)
+        audioSettingsLabel.config(bg="Gray", width=40)
         audioSettingsLabel.grid(column=0, row=3, columnspan=3, pady=5)
 
         minLvlLabel = Label(self.settingsWin, text="Min Audio Level:")
@@ -275,7 +294,7 @@ class Audio3DInterface:
         minLvlSlider.grid(column=1, row=4, columnspan=2)
     #Orbit Settings
         orbitSettingsLabel = Label(self.settingsWin, text="Orbit Mode Settings:")
-        orbitSettingsLabel.config(bg="Gray", width=30)
+        orbitSettingsLabel.config(bg="Gray", width=40)
         orbitSettingsLabel.grid(column=0, row=5, columnspan=3, pady=5)
 
         orbitDirectionLabel = Label(self.settingsWin, text="Orbit Direction:")
